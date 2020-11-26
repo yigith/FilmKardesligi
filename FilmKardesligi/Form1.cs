@@ -1,8 +1,10 @@
 ﻿using FilmKardesligi.Models;
+using FilmKardesligi.Properties;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data;
+using System.Data.Entity;
 using System.Drawing;
 using System.Linq;
 using System.Text;
@@ -15,22 +17,60 @@ namespace FilmKardesligi
     {
         FilmKardesligiContext db = new FilmKardesligiContext();
         Film duzenlenen = null;
+        bool listelensinMi = false;
+        bool fotoVarMi = false;
+
         public Form1()
         {
             InitializeComponent();
-            FilmleriListele();
+            PuanFiltreDoldur();
             TurleriListele();
+            listelensinMi = true;
+            FilmleriListele();
+        }
+
+        private void PuanFiltreDoldur()
+        {
+            var ogeler = new List<PuanFiltreOge>()
+            {
+                new PuanFiltreOge() { Puan = 0, Metin = "Tüm Puanlar" }
+            };
+
+            for (int i = 1; i <= 5; i++)
+                ogeler.Add(new PuanFiltreOge() { Puan = i, Metin = Utilities.Yildizla(i) });
+
+            cboPuanFiltre.DataSource = ogeler;
+            cboPuanFiltre.DisplayMember = "Metin";
+            cboPuanFiltre.ValueMember = "Puan";
         }
 
         private void TurleriListele()
         {
             clbTur.DataSource = db.Turler.OrderBy(x => x.TurAd).ToList();
             clbTur.DisplayMember = "TurAd";
+
+            var filtreTurler = db.Turler.OrderBy(x => x.TurAd).ToList();
+            filtreTurler.Insert(0, new Tur { TurAd = "Tüm Türler" });
+            cboTurFiltre.DataSource = filtreTurler;
         }
 
         private void FilmleriListele()
         {
-            lstFilmler.DataSource = db.Filmler
+            if (!listelensinMi) return;
+
+            BackgroundImage = null;
+            int turId = (int)cboTurFiltre.SelectedValue;
+            int puan = (int)cboPuanFiltre.SelectedValue;
+
+            IQueryable<Film> filmler = db.Filmler;
+
+            if (turId > 0)
+                filmler = filmler.Where(x => x.Turler.Any(t => t.Id == turId));
+
+            if (puan > 0)
+                filmler = filmler.Where(x => x.Puan == puan);
+
+            lstFilmler.DataSource = filmler
                 .OrderByDescending(x => x.Puan)
                 .ThenBy(x => x.FilmAd)
                 .ToList();
@@ -58,6 +98,11 @@ namespace FilmKardesligi
                             .Tag
                         );
             List<Tur> seciliTurler = clbTur.CheckedItems.OfType<Tur>().ToList();
+            //film.Turler = new List<Tur>();
+            //foreach (var item in clbTur.CheckedItems)
+            //    film.Turler.Add((Tur)item);
+
+            byte[] foto = fotoVarMi ? Utilities.ImageToByteArray(pboFoto.Image) : null;
 
             if (filmAd == "")
             {
@@ -78,13 +123,9 @@ namespace FilmKardesligi
                 {
                     FilmAd = filmAd,
                     Puan = puan,
-                    Turler = seciliTurler
+                    Turler = seciliTurler,
+                    Foto = foto
                 };
-
-                //film.Turler = new List<Tur>();
-                //foreach (var item in clbTur.CheckedItems)
-                //    film.Turler.Add((Tur)item);
-
                 db.Filmler.Add(film);
                 #endregion
             }
@@ -94,6 +135,7 @@ namespace FilmKardesligi
                 duzenlenen.FilmAd = filmAd;
                 duzenlenen.Puan = puan;
                 duzenlenen.Turler = seciliTurler;
+                duzenlenen.Foto = foto;
                 #endregion
             }
 
@@ -111,6 +153,8 @@ namespace FilmKardesligi
                 clbTur.SetItemChecked(i, false);
             }
             rbPuan3.Checked = true;
+            pboFoto.Image = Resources.noimage;
+            fotoVarMi = false;
         }
 
         private void FormuResetle()
@@ -142,7 +186,7 @@ namespace FilmKardesligi
                                         : lstFilmler.Items.Count - 1;
         }
 
-        
+
         private void btnDuzenle_Click(object sender, EventArgs e)
         {
             int sid = lstFilmler.SelectedIndex;
@@ -171,6 +215,12 @@ namespace FilmKardesligi
             gboPuan.Controls.OfType<RadioButton>()
                 .FirstOrDefault(x => (string)x.Tag == duzenlenen.Puan.ToString())
                 .Checked = true;
+            // foto varsa picture box içinde göster
+            fotoVarMi = duzenlenen.Foto != null;
+            pboFoto.Image = fotoVarMi 
+                ? Utilities.ByteArrayToImage(duzenlenen.Foto) 
+                : Resources.noimage;
+
             btnIptal.Show();
             btnEkle.Text = "KAYDET";
             lstFilmler.Enabled = btnDuzenle.Enabled = btnSil.Enabled = false;
@@ -179,6 +229,59 @@ namespace FilmKardesligi
         private void btnIptal_Click(object sender, EventArgs e)
         {
             FormuResetle();
+        }
+
+        private void cboTurFiltre_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            FilmleriListele();
+        }
+
+        private void cboPuanFiltre_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            FilmleriListele();
+        }
+
+        private void lblFotoDegistir_Click(object sender, EventArgs e)
+        {
+            // https://stackoverflow.com/questions/2069048/setting-the-filter-to-an-openfiledialog-to-allow-the-typical-image-formats
+            DialogResult dr = ofdFoto.ShowDialog();
+
+            if (dr == DialogResult.OK)
+            {
+                try
+                {
+                    pboFoto.Image = new Bitmap(ofdFoto.FileName);
+                    fotoVarMi = true;
+
+                }
+                catch (Exception)
+                {
+                    MessageBox.Show("Lütfen geçerli bir resim dosyası seçiniz.");
+                }
+            }
+        }
+
+        private void lstFilmler_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            if (lstFilmler.SelectedIndex < 0)
+                return;
+            
+            Film film = (Film)lstFilmler.SelectedItem;
+
+            if (film.Foto != null)
+            {
+                BackgroundImage = Utilities.ByteArrayToImage(film.Foto);
+            }
+            else
+            {
+                BackgroundImage = null;
+            }
+        }
+
+        private void lblFotoKaldir_Click(object sender, EventArgs e)
+        {
+            pboFoto.Image = Resources.noimage;
+            fotoVarMi = false;
         }
     }
 }
